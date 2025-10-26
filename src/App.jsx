@@ -13,6 +13,7 @@ function App() {
   const [locationPermission, setLocationPermission] = useState('prompt')
   const [map, setMap] = useState(null)
   const [placesService, setPlacesService] = useState(null)
+  const [apiReady, setApiReady] = useState(false)
 
   // Initialize Google Maps
   useEffect(() => {
@@ -35,6 +36,7 @@ function App() {
 
         setMap(tempMap)
         setPlacesService(service)
+        setApiReady(true)
       } catch (err) {
         setError('無法載入 Google Maps API，請確認 API 金鑰是否正確設定')
         console.error('Maps initialization error:', err)
@@ -43,6 +45,46 @@ function App() {
 
     initializeMap()
   }, [])
+
+  // Search nearby restaurants using Places API
+  const searchNearbyRestaurants = useCallback((userLocation) => {
+    if (!placesService) {
+      setError('地圖服務尚未準備好，請稍後再試')
+      setLoading(false)
+      return
+    }
+
+    const request = {
+      location: new google.maps.LatLng(userLocation.lat, userLocation.lng),
+      radius: 1500, // 1.5 km radius
+      type: 'restaurant'
+    }
+
+    placesService.nearbySearch(request, (results, status) => {
+      if (status === google.maps.places.PlacesServiceStatus.OK && results) {
+        // Process and enrich restaurant data
+        const processedRestaurants = results.map(place => ({
+          id: place.place_id,
+          name: place.name,
+          rating: place.rating || 0,
+          userRatingsTotal: place.user_ratings_total || 0,
+          vicinity: place.vicinity,
+          photos: place.photos || [],
+          geometry: place.geometry,
+          openNow: place.opening_hours?.open_now,
+          priceLevel: place.price_level,
+          types: place.types
+        }))
+
+        setRestaurants(processedRestaurants)
+        setLoading(false)
+      } else {
+        setError('無法搜尋附近餐廳，請稍後再試')
+        setLoading(false)
+        console.error('Places search error:', status)
+      }
+    })
+  }, [placesService])
 
   // Get user location
   const getUserLocation = useCallback(() => {
@@ -88,47 +130,7 @@ function App() {
         maximumAge: 0
       }
     )
-  }, [])
-
-  // Search nearby restaurants using Places API
-  const searchNearbyRestaurants = useCallback((userLocation) => {
-    if (!placesService) {
-      setError('地圖服務尚未準備好，請稍後再試')
-      setLoading(false)
-      return
-    }
-
-    const request = {
-      location: new google.maps.LatLng(userLocation.lat, userLocation.lng),
-      radius: 1500, // 1.5 km radius
-      type: 'restaurant'
-    }
-
-    placesService.nearbySearch(request, (results, status) => {
-      if (status === google.maps.places.PlacesServiceStatus.OK && results) {
-        // Process and enrich restaurant data
-        const processedRestaurants = results.map(place => ({
-          id: place.place_id,
-          name: place.name,
-          rating: place.rating || 0,
-          userRatingsTotal: place.user_ratings_total || 0,
-          vicinity: place.vicinity,
-          photos: place.photos || [],
-          geometry: place.geometry,
-          openNow: place.opening_hours?.open_now,
-          priceLevel: place.price_level,
-          types: place.types
-        }))
-
-        setRestaurants(processedRestaurants)
-        setLoading(false)
-      } else {
-        setError('無法搜尋附近餐廳，請稍後再試')
-        setLoading(false)
-        console.error('Places search error:', status)
-      }
-    })
-  }, [placesService])
+  }, [searchNearbyRestaurants])
 
   // Calculate distance between two points using Haversine formula
   const calculateDistance = useCallback((lat1, lng1, lat2, lng2) => {
@@ -171,10 +173,10 @@ function App() {
 
   // Request location on mount
   useEffect(() => {
-    if (placesService && !location) {
+    if (apiReady && !location) {
       getUserLocation()
     }
-  }, [placesService, location, getUserLocation])
+  }, [apiReady, location, getUserLocation])
 
   return (
     <div className="app">
@@ -184,16 +186,23 @@ function App() {
       </header>
 
       <main className="app-main">
+        {!apiReady && !error && (
+          <div className="loading">
+            <div className="spinner"></div>
+            <p>正在載入地圖服務...</p>
+          </div>
+        )}
+
         {error && (
           <div className="error-message">
             <span>⚠️ {error}</span>
-            {locationPermission === 'denied' && (
+            {(locationPermission === 'denied' || !apiReady) && (
               <button onClick={getUserLocation}>重試</button>
             )}
           </div>
         )}
 
-        {loading && (
+        {apiReady && loading && (
           <div className="loading">
             <div className="spinner"></div>
             <p>正在搜尋附近餐廳...</p>
